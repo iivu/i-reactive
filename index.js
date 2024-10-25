@@ -3,9 +3,11 @@
 const bucket = new WeakMap()
 // 副作用栈，处理多个effect嵌套执行的情况
 const effectStack = [];
+// 待执行的effectFn集合
+const jobs = new Set();
 // 全局变量，用来保存当前正在执行的副作用函数
 let activeEffect = undefined;
-
+let p = Promise.resolve();
 
 // effect负责设置副作用函数并调用它
 export function effect(fn, options = {}) {
@@ -31,6 +33,17 @@ function cleanup(effectFn) {
     deps.delete(effectFn)
   }
   effectFn.deps.length = 0
+}
+
+// 清空jobs
+let isFlushing = false;
+function flushJobs() {
+  if (isFlushing) return;
+  isFlushing = true;
+  p.then(() => jobs.forEach(job => job())).finally(() => {
+    jobs.clear();
+    isFlushing = false;
+  })
 }
 
 // 跟踪变化
@@ -73,7 +86,16 @@ export function trigger(target, key) {
       if (effectFn.options.scheduler) {
         effectFn.options.scheduler(effectFn)
       } else {
-        effectFn();
+        /**
+         * 任务调度机制，多次trigger也只会执行一次effectFn:
+         * const proxy = { foo: 1 }
+         * effect(() => console.log(proxy.foo))
+         * proxy.foo++
+         * proxy.foo++
+         * 输出：1,3
+         */
+        jobs.add(effectFn);
+        flushJobs();
       }
     });
 }
