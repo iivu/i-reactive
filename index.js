@@ -8,7 +8,7 @@ let activeEffect = undefined;
 
 
 // effect负责设置副作用函数并调用它
-export function effect(fn) {
+export function effect(fn, options = {}) {
   const effectFn = () => {
     // 每次运行effectFn都先清除自身所有的依赖，避免因分支切换引起依赖残留
     cleanup(effectFn);
@@ -20,6 +20,7 @@ export function effect(fn) {
   }
   // 搜集与该effectFn相关的依赖集合
   effectFn.deps = []
+  effectFn.options = options;
   effectFn()
 }
 
@@ -68,7 +69,13 @@ export function trigger(target, key) {
         effectFnsToRun.add(effectsFn);
       }
     })
-    effectFnsToRun.forEach(effectFn => effectFn());
+    effectFnsToRun.forEach(effectFn => {
+      if (effectFn.options.scheduler) {
+        effectFn.options.scheduler(effectFn)
+      } else {
+        effectFn();
+      }
+    });
 }
 
 const data = { text: 'hello world!' }
