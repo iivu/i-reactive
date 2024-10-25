@@ -38,12 +38,12 @@ export function track(target, key) {
   // 取得当前响应式数据所有副作用函数的map: target -> Map<key, Set<fn>>
   let depsMap = bucket.get(target)
   if (!depsMap) {
-    bucket.put(target, (depsMap = new Map()))
+    bucket.set(target, (depsMap = new Map()))
   }
   // 取得当前key的副作用函数集合: key -> Set<fn>
   let deps = depsMap.get(key)
   if (!deps) {
-    depsMap.put(key, (deps = new Set()))
+    depsMap.set(key, (deps = new Set()))
   }
   // 建立联系: target -> key -> effectFn
   deps.add(activeEffect)
