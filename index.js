@@ -56,8 +56,18 @@ export function trigger(target, key) {
     const depsMap = bucket.get(target);
     if (!depsMap) return;
     const effectFns = depsMap.get(key);
-    // 避免set的边遍历边添加导致的无限循环
-    const effectFnsToRun = new Set(effectFns);
+    // 新开一个set，避免原set边遍历边添加导致的无限循环
+    const effectFnsToRun = new Set();
+    effectFns?.forEach(effectsFn => {
+      if (effectsFn !== activeEffect) {
+        /**
+         * 当在一个effectFn中既触发了搜集又触发了变更，就会导致无限循环，内存溢出:
+         * effect(() => proxy.foo++)
+         * 因此如果当前正在搜集的activeEffect与需要执行effectsFn相同，则跳过当次的执行
+         */
+        effectFnsToRun.add(effectsFn);
+      }
+    })
     effectFnsToRun.forEach(effectFn => effectFn());
 }
 
