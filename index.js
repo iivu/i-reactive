@@ -6,8 +6,24 @@ let activeEffect = null
 
 // effect复制设置副作用函数并调用它
 export function effect(fn) {
-  activeEffect = fn
-  fn()
+  const effectFn = () => {
+    // 每次运行effectFn都先清除自身所有的依赖，避免因分支切换引起依赖残留
+    cleanup(effectFn);
+    activeEffect = effectFn
+    fn()
+  }
+  // 搜集与该effectFn相关的依赖集合
+  effectFn.deps = []
+  effectFn()
+}
+
+// 清除依赖
+function cleanup(effectFn) {
+  for (let i = 0; i < effectFn.deps; i++) {
+    const deps = effectFn.deps[i]
+    deps.delete(effectFn)
+  }
+  effectFn.deps.length = 0
 }
 
 // 跟踪变化
@@ -25,11 +41,18 @@ export function track(target, key) {
   }
   // 建立联系: target -> key -> effectFn
   deps.add(activeEffect)
+  // 记录依赖集合
+  activeEffect.deps.push(deps)
 }
 
 // 变化后触发副作用
 export function trigger(target, key) {
-  bucket.get(target)?.get(key)?.forEach(fn => fn())
+    const depsMap = bucket.get(target);
+    if (!depsMap) return;
+    const effectFns = depsMap.get(key);
+    // 避免set的边遍历边添加导致的无限循环
+    const effectFnsToRun = new Set(effectFns);
+    effectFnsToRun.forEach(effectFn => effectFn());
 }
 
 const data = { text: 'hello world!' }
