@@ -1,16 +1,22 @@
 // 副作用函数桶，保存所有副作用函数
 // target -> Map<key, Set<fn>>
 const bucket = new WeakMap()
+// 副作用栈，处理多个effect嵌套执行的情况
+const effectStack = [];
 // 全局变量，用来保存当前正在执行的副作用函数
-let activeEffect = null
+let activeEffect = undefined;
 
-// effect复制设置副作用函数并调用它
+
+// effect负责设置副作用函数并调用它
 export function effect(fn) {
   const effectFn = () => {
     // 每次运行effectFn都先清除自身所有的依赖，避免因分支切换引起依赖残留
     cleanup(effectFn);
-    activeEffect = effectFn
+    activeEffect = effectFn;
+    effectStack.push(effectFn);
     fn()
+    effectStack.pop();
+    activeEffect = effectStack[effectStack.length - 1];
   }
   // 搜集与该effectFn相关的依赖集合
   effectFn.deps = []
