@@ -16,14 +16,18 @@ export function effect(fn, options = {}) {
     cleanup(effectFn);
     activeEffect = effectFn;
     effectStack.push(effectFn);
-    fn()
+    const res = fn();
     effectStack.pop();
     activeEffect = effectStack[effectStack.length - 1];
+    return res;
   }
   // 搜集与该effectFn相关的依赖集合
   effectFn.deps = []
   effectFn.options = options;
-  effectFn()
+  if (!options.lazy) {
+    return effectFn;
+  }
+  effectFn();
 }
 
 // 清除依赖
