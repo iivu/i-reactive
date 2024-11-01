@@ -1,6 +1,6 @@
 import { effect, track, trigger } from '.';
 
-export function watch(sources, callback) {
+export function watch(sources, callback, options = {}) {
   let getter;
   if (typeof sources === 'function') {
     getter = sources;
@@ -11,12 +11,23 @@ export function watch(sources, callback) {
   const effectFn = effect(() => getter(), {
     lazy: true,
     scheduler: () => {
-      newValue = effectFn();
-      callback(newValue, oldValue);
-      oldValue = newValue;
+      if (options.flush === 'post') {
+        Promise.resolve().then(job);
+      } else {
+        job();
+      }
     },
   });
-  oldValue = effectFn();
+  function job() {
+    newValue = effectFn();
+    callback(newValue, oldValue);
+    oldValue = newValue;
+  }
+  if (options.immediate) {
+    job();
+  } else {
+    oldValue = effectFn();
+  }
 }
 
 function traverse(target, seen = new Set()) {
