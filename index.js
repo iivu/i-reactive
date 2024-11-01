@@ -1,3 +1,9 @@
+const TriggerType = {
+  SET: 'SET',
+  ADD: 'ADD',
+  DELETE: 'DELETE',
+};
+const ITERATE_KEY = Symbol(0);
 // 副作用函数桶，保存所有副作用函数
 // target -> Map<key, Set<fn>>
 const bucket = new WeakMap();
@@ -70,13 +76,12 @@ export function track(target, key) {
 }
 
 // 变化后触发副作用
-export function trigger(target, key) {
+export function trigger(target, key, type) {
   const depsMap = bucket.get(target);
   if (!depsMap) return;
-  const effectFns = depsMap.get(key);
   // 新开一个set，避免原set边遍历边添加导致的无限循环
   const effectFnsToRun = new Set();
-  effectFns?.forEach(effectsFn => {
+  depsMap.get(key)?.forEach(effectsFn => {
     if (effectsFn !== activeEffect) {
       /**
        * 当在一个effectFn中既触发了搜集又触发了变更，就会导致无限循环，内存溢出:
@@ -86,6 +91,14 @@ export function trigger(target, key) {
       effectFnsToRun.add(effectsFn);
     }
   });
+  // 如果当前是添加属性或删除属性操作，就把for..,in相关的副作用取出执行
+  if (type === TriggerType.ADD || type === TriggerType.DELETE) {
+    depsMap.get(ITERATE_KEY)?.forEach(effectsFn => {
+      if (effectsFn !== activeEffect) {
+        effectFnsToRun.add(effectsFn);
+      }
+    });
+  }
   effectFnsToRun.forEach(effectFn => {
     if (effectFn.options.scheduler) {
       effectFn.options.scheduler(effectFn);
@@ -104,21 +117,57 @@ export function trigger(target, key) {
   });
 }
 
-const data = { text: 'hello world!' };
-const proxy = new Proxy(data, {
-  get(target, key, receiver) {
-    // 每当发生读操作，都把当前的副作用函数放到bucket
-    track(target, key);
-    return Reflect.get(target, key, receiver);
-  },
-  set(target, key, newValue, receiver) {
-    Reflect.set(target, key, receiver);
-    target[key] = newValue;
-    // 每当发生写操作，都把副作用函数执行一遍
-    trigger(target, key);
-    return true;
-  },
-});
+export function reactive(data) {
+  return new Proxy(data, {
+    get(target, key, receiver) {
+      if(key === 'raw') {
+        // 可以通过raw获取到原始对象：proxy.raw === data;
+        return target;
+      }
+      // get操作
+      track(target, key);
+      return Reflect.get(target, key, receiver);
+    },
+    has(target, key) {
+      // in操作
+      track(target, key);
+      return Reflect.has(target, key);
+    },
+    ownKeys(target) {
+      // for...in 操作
+      // 由于枚举自身key的操作并不会和某个key相关联，因此这里使用一个自定义的key
+      track(target, ITERATE_KEY);
+      return Reflect.ownKeys(target);
+    },
+    deleteProperty(target, key) {
+      const result = Reflect.defineProperty(target, key);
+      const owned = Object.hasOwnProperty.call(target, key);
+      if (result && owned) {
+        trigger(target, key, TriggerType.DELETE);
+      }
+      return result;
+    },
+    set(target, key, newValue, receiver) {
+      // 每当发生写操作，都把副作用函数执行一遍
+      const oldValue = target[key];
+      const type = Object.prototype.hasOwnProperty.call(target, key)
+        ? TriggerType.SET
+        : TriggerType.ADD;
+      const result = Reflect.set(target, key, newValue, receiver);
+      if (target === receiver.raw) {
+        // target === receiver.raw 说明receiver就是target的代理对象
+        // 解决因为原型链问题引起的副作用重复执行
+        if (oldValue !== newValue && (oldValue === oldValue || newValue === newValue)) {
+          // 当新旧值不一样的时候才触发响应
+          // oldValue === oldValue || newValue === newValue 的分支用来解决NaN的问题
+          trigger(target, key, type);
+        }
+      }
+      return result;
+    },
+  });
+}
 
-effect(() => (document.body.innerText = proxy.text));
+const data = reactive({ text: 'hello world!' });
+effect(() => (document.body.innerText = data.text));
 setTimeout(() => (proxy.text = 'Reactive!'), 2500);
