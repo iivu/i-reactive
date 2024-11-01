@@ -8,6 +8,10 @@ export function watch(sources, callback, options = {}) {
     getter = () => traverse(target);
   }
   let oldValue, newValue;
+  let cleanup;
+  function onInvalidate(fn) {
+    cleanup = fn;
+  }
   const effectFn = effect(() => getter(), {
     lazy: true,
     scheduler: () => {
@@ -20,7 +24,10 @@ export function watch(sources, callback, options = {}) {
   });
   function job() {
     newValue = effectFn();
-    callback(newValue, oldValue);
+    if (cleanup) {
+      cleanup();
+    }
+    callback(newValue, oldValue, onInvalidate);
     oldValue = newValue;
   }
   if (options.immediate) {
