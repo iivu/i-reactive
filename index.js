@@ -229,8 +229,9 @@ function createReactive(data, isShallow = false, isReadonly = false) {
         console.warn(`Property ${key} is readonly.`)
         return true
       }
-      const result = Reflect.defineProperty(target, key)
+      // 是否是自己属性？
       const owned = Object.hasOwnProperty.call(target, key)
+      const result = Reflect.deleteProperty(target, key)
       if (result && owned) {
         trigger(target, key, TriggerType.DELETE)
       }
