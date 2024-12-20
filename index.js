@@ -124,21 +124,32 @@ export function shallowReactive(data) {
   return createReactive(data, true)
 }
 
-function createReactive(data, isShallow = false) {
+export function readonly(data) {
+  return createReactive(data, false, true);
+}
+
+export function shallowReadonly(data) {
+  return createReactive(data, true, true);
+}
+
+function createReactive(data, isShallow = false, isReadonly = false) {
   return new Proxy(data, {
     get(target, key, receiver) {
+      // get操作
       if (key === 'raw') {
         // 可以通过raw获取到原始对象：proxy.raw === data;
         return target
       }
-      // get操作
-      track(target, key)
+      // 如果一个属性是只读的，那就没必要跟踪变化了，因为它不会变
+      if (!isReadonly) {
+        track(target, key)
+      }
       const res = Reflect.get(target, key, receiver)
       if (isShallow) {
         return res
       }
       if (typeof res === 'object' && res !== null) {
-        return reactive(res)
+        return isReadonly ? readonly(res) : reactive(res)
       }
       return res
     },
@@ -154,6 +165,10 @@ function createReactive(data, isShallow = false) {
       return Reflect.ownKeys(target)
     },
     deleteProperty(target, key) {
+      if (isReadonly) {
+        console.warn(`Property ${key} is readonly.`)
+        return true
+      }
       const result = Reflect.defineProperty(target, key)
       const owned = Object.hasOwnProperty.call(target, key)
       if (result && owned) {
@@ -162,6 +177,10 @@ function createReactive(data, isShallow = false) {
       return result
     },
     set(target, key, newValue, receiver) {
+      if (isReadonly) {
+        console.warn(`Property ${key} is readonly.`)
+        return true
+      }
       // 每当发生写操作，都把副作用函数执行一遍
       const oldValue = target[key]
       const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
