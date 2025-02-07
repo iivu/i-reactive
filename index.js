@@ -207,7 +207,7 @@ function createReactive(data, isShallow = false, isReadonly = false) {
         return res
       }
       if (typeof res === 'object' && res !== null) {
-        return isReadonly ? readonly(res) : reactive(res)
+        return createReactive(res, isShallow, isReadonly);
       }
       return res
     },
