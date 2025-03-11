@@ -58,7 +58,7 @@ export function effect(fn, options = {}) {
   // 搜集与该effectFn相关的依赖集合
   effectFn.deps = []
   effectFn.options = options
-  if (!options.lazy) {
+  if (options.lazy) {
     return effectFn
   }
   effectFn()

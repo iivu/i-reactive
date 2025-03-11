@@ -1,4 +1,4 @@
-import { reactive } from '.';
+import { reactive, shallowReactive } from '.';
 
 function markRef(refObj) {
   Object.defineProperty(refObj, '__v_isRef', { value: true });
@@ -8,6 +8,12 @@ export function ref(value) {
   const wrapper = { value };
   markRef(wrapper);
   return reactive(wrapper);
+}
+
+export function shallowRef(value) {
+  const wrapper = { value };
+  markRef(wrapper);
+  return shallowReactive(wrapper);
 }
 
 export function toRef(obj, key) {

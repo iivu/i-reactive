@@ -1,3 +1,14 @@
+import { reactive, effect, shallowReactive, shallowReadonly } from './'
+
+const Text = Symbol();
+const Comment = Symbol();
+const Fragment = Symbol();
+let currentInstance = null;
+
+function setCurrentInstance(instance) {
+  currentInstance = instance;
+}
+
 export function createRenderer({
   createElement,
   setElementText,
@@ -6,9 +17,6 @@ export function createRenderer({
   createText,
   setText,
 }) {
-  const Text = Symbol();
-  const Comment = Symbol();
-  const Fragment = Symbol();
   /**
    * @param {vnode} n1 旧vnode
    * @param {vnode} n2 新vnode
@@ -31,8 +39,13 @@ export function createRenderer({
         // 更新
         patchElement(n1, n2);
       }
-    } else if (typeof type === 'object') {
+    } else if (typeof type === 'object' || typeof type === 'function') {
       // 组件
+      if (!n1) {
+        mountComponent(n2, container, anchor);
+      } else {
+        patchComponent(n1, n2, anchor);
+      }
     } else if (type === Text) {
       // 文本节点
       if (!n1) {
@@ -67,13 +80,16 @@ export function createRenderer({
   }
 
   function unmount(vnode) {
-    const p = vnode.el.parentNode;
     if (vnode.type === Fragment) {
       vnode.children.forEach(c => unmount(c));
       return;
+    } else if (typeof vnode.type === 'object') {
+      unmount(vnode.component.subTree);
+      return;
     }
+    const p = vnode.el.parentNode;
     if (p) {
-      p.removeChild(el);
+      p.removeChild(vnode.el);
     }
   }
 
@@ -115,6 +131,131 @@ export function createRenderer({
     patchChildren(n1, n2, el);
   }
 
+  function mountComponent(vnode, container, anchor) {
+    let componentOptions = vnode.type;
+    const isFunctional = typeof vnode.type === 'function';
+    if (isFunctional) {
+      componentOptions = {
+        render: vnode.type,
+        props: vnode.type.props,
+      }
+    }
+    const { render, data, props: propsOption, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated, setup }  = componentOptions;
+    beforeCreate?.();
+    const state = reactive(data());
+    const [props, attrs] = resolveProps(propsOption, vnode.props);
+    const slots = vnode.children || null;
+    const instance = {
+      state,
+      props: shallowReactive(props),
+      isMounted: false,
+      subTree: null,
+      slots,
+      mounted: []
+    };
+    const emit = (event, ...payload) => {
+      const evenName = `on${event[0].toUpperCase()}${event.slice(1)}`;
+      const handler = instance.props[evenName];
+      handler?.(...payload);
+    }
+    const setupContext = { attrs, emit, slots };
+    setCurrentInstance(instance);
+    const setupResult = setup?.(shallowReadonly(props), setupContext);
+    setCurrentInstance(null);
+    let setupState = null;
+    if (typeof setupResult === 'function') {
+      if (render) console.error('render and setup cannot exist at the same time.');
+      render = setupResult;
+    } else {
+      setupState = setupResult;
+    }
+    vnode.component = instance;
+    // 创建渲染上下文
+    const renderContext = new Proxy(instance, {
+      get(t, k, r) {
+        const { state, props } = t;
+        if (k === '$slot') {
+          return slots;
+        } else if (state && k in state) {
+          return state[k];
+        } else if (props && k in props) {
+          return props[k];
+        } else if (setupState && k in setupState) {
+          return setupState[k];
+        } else {
+          console.warn(`${k} is not exist in state or props`);
+        }
+      },
+      set(t, k, v, r) {
+        const { state, props } = t;
+        if (state && k in state) {
+          state[k] = v;
+        } else if (setupState && k in setupState) {
+          setupState[k] = v;
+        } else if (props && k in props) {
+          console.warn(`Attempting to mutate prop "${k}". Props is readonly.`);
+        } else {
+          console.warn(`${k} is not exist in state or props`);
+        }
+      }
+    });
+    created?.call(renderContext);
+    effect(() => {
+      const subTree = render.call(instance, state);
+      if (!instance.isMounted) {
+        beforeMount?.call(renderContext);
+        patch(null, subTree, container, anchor);
+        instance.isMounted = true;
+        mounted?.call(renderContext);
+        instance.mounted?.forEach(f => f.call(renderContext));
+      } else {
+        beforeUpdate?.call(renderContext);
+        patch(instance.subTree, subTree, container, anchor)
+        updated?.call(renderContext);
+      }
+      instance.subTree = subTree;
+    })
+  }
+
+  function patchComponent(n1, n2, anchor) {
+    const instance = (n2.component = n1.component);
+    const { props } = instance;
+    if (hasPropsChanged(n1.props, n2.props)) {
+      const [ nextProps ] = resolveProps(n2.type.props, n2.props);
+      for (const k in nextProps) {
+        props[k] = nextProps[k];
+      }
+      for (const k in props) {
+        if (!(k in nextProps)) {
+          delete props[k];
+        }
+      }
+    }
+  }
+
+  function resolveProps(options, propsData) {
+    const props = {};
+    const attrs = {};
+    for (const key in propsData) {
+      if (key in options || key.startsWith('on')) {
+        props[key] = propsData[key];
+      } else {
+        attrs[key] = propsData[key];
+      }
+    }
+    return [props, attrs];
+  }
+
+  function hasPropsChanged(prevProps, nextProps) {
+    const nextKeys = Object.keys(nextProps);
+    if (nextKeys.length !== Object.keys(prevProps).length) return true;
+    for (let i = 0; i < nextKeys.length; i++) {
+      const key = nextKeys[i];
+      if (prevProps[key] !== nextProps[key]) return true;
+    }
+    return false;
+  }
+
   function patchChildren(n1, n2, container) {
     if (typeof n2.children === 'string') {
       // 当新子节点是文本节点时
@@ -126,7 +267,8 @@ export function createRenderer({
       // 如果新子节点是一组子节点
       if (Array.isArray(n1.children)) {
         // patchKeyedChildren1(n1, n2, container);
-        patchKeyedChildren2(n1, n2, container);
+        // patchKeyedChildren2(n1, n2, container);
+        patchKeyedChildren3(n1, n2, container);
       } else {
         // 否则清空容器，循环挂载子节点
         setElementText(container, '');
@@ -258,8 +400,116 @@ export function createRenderer({
   }
 
   // 快速diff
-  function patchKeyedChildren2(n1, n2, container) {
+  function patchKeyedChildren3(n1, n2, container) {
+    const newChildren = n2.children;
+    const oldChildren = n1.children;
+    // 处理相同的前置节点
+    let j = 0,
+      oldVNode = oldChildren[j],
+      newVNode = newChildren[j];
+    while (oldVNode.key === newVNode.key) {
+      patch(oldVNode, newVNode, container);
+      j++;
+      oldVNode = oldChildren[j];
+      newVNode = newChildren[j];
+    }
+    // 处理相同的后置节点
+    let oldEndIdx = oldChildren.length - 1;
+    let newEndIdx = newChildren.length - 1;
+    oldVNode = oldChildren[oldEndIdx];
+    newVNode = newChildren[newEndIdx];
+    while (oldVNode.key === newVNode.key) {
+      patch(oldVNode, newVNode, container);
+      oldEndIdx--;
+      newEndIdx--;
+      oldVNode = oldChildren[oldEndIdx];
+      newVNode = newChildren[newEndIdx];
+    }
+    if (j > oldEndIdx && j <= newEndIdx) {
+      // 新子节点有新元素需要挂载
+      const anchorIndex = newEndIdx + 1;
+      const anchor =
+        anchorIndex < newChildren.length ? newChildren[anchorIndex].el : null;
+      while (j <= newEndIdx) {
+        patch(null, newChildren[j++], container, anchor);
+      }
+    } else if (j > newEndIdx && j <= oldEndIdx) {
+      // 旧子节点有旧元素需要被卸载
+      while (j <= oldEndIdx) {
+        unmount(oldChildren[j++]);
+      }
+    } else {
+      // 新旧两组子节点均有剩余未处理元素
+      // 构造source数组，长度等于新子元素中未处理元素的数量，初始值都是-1
+      const source = new Array(newEndIdx - j + 1).fill(-1);
+      const oldStart = (newStart = j);
+      const count = newEndIdx - j + 1; // 新子节点剩余需要处理的数量
+      // 寻找新节点在旧节点中位置，并记录到source中
+      // 索引表：新子节点的key -> 新子节点的index
+      const newKeyIndex = {};
+      let moved = false; // 是否需要移动
+      let pos = 0; // 遍历过程中的最大索引，用来判断是否需要移动
+      let patched = 0; // 已更新的节点数量
+      for (let i = newStart; i <= newEndIdx; i++) {
+        newKeyIndex[newChildren[i].key] = i;
+      }
+      for (let i = oldStart; i <= oldEndIdx; i++) {
+        const oldVNode = oldChildren[i];
+        if (patched <= count) {
+          const k = newKeyIndex[oldChildren.key];
+          if (typeof k !== undefined) {
+            const newVNode = newChildren[k];
+            patch(oldVNode, newVNode, container);
+            patched++;
+            source[k - newStart] = i;
+            if (k < pos) {
+              moved = true;
+            } else {
+              pos = k;
+            }
+          } else {
+            unmount(oldVNode);
+          }
+        } else {
+          unmount(oldVNode);
+        }
+      }
+      if (moved) {
+        // 需要移动
+        // 最长递增子序列，意味着这里面的新节点都不需要移动
+        const seq = lis(source);
+        let s = seq.length - 1;
+        let i = count - 1;
+        for (i; i >= 0; i--) {
+          if (source[i] === -1) {
+            // 需要挂载新节点
+            const pos = i + newStart;
+            const newVNode = newChildren[pos];
+            const nextPos = pos + 1;
+            const anchor = nextPos < newChildren.length ? newChildren[nextPos].el : null;
+            patch(null, newVNode, container, anchor);
+          } else if (i !== seq[s]) {
+            // 当前节点需要移动
+            const pos = i + newStart;
+            const newVNode = newChildren[pos];
+            const nextPos = pos + 1;
+            const anchor = nextPos < newChildren.length ? newChildren[nextPos].el : null;
+            insert(newVNode.el, container, anchor);
+          } else {
+            // 当前节点不需要移动
+            s--;
+          }
+        }
+      }
+    }
+  }
 
+  function onMounted(fn) {
+    if (currentInstance) {
+      currentInstance.mounted.push(fn);
+    } else {
+      console.warn('onMounted can only use in setup function');
+    }
   }
 
   return { patch, render };
@@ -339,3 +589,7 @@ export const renderer = createRenderer({
     }
   },
 });
+
+function lis(source) {
+  // TODO: 最长递增子序列
+}
