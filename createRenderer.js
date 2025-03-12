@@ -67,6 +67,12 @@ export function createRenderer({
       } else {
         patchChildren(n1, n2, container);
       }
+    } else if (typeof type === 'object' && type.__isTeleport) {
+      type.process(n1, n2, container, anchor, {
+        patch, patchChildren, unmount, move(vnode, container, anchor) {
+          insert(vnode.component ? vnode.component.subTree.el : vnode.el, container, anchor);
+        }
+      })
     }
   }
 
