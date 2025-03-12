@@ -90,6 +90,7 @@ export function createRenderer({
   }
 
   function unmount(vnode) {
+    const needTransition = vnode.transition;
     if (vnode.type === Fragment) {
       vnode.children.forEach(c => unmount(c));
       return;
@@ -103,7 +104,12 @@ export function createRenderer({
     }
     const p = vnode.el.parentNode;
     if (p) {
-      p.removeChild(vnode.el);
+      const doRemove = () => p.removeChild(vnode.el);
+      if (needTransition) {
+        vnode.transition.leave(vnode.el, doRemove);
+      } else {
+        doRemove();
+      }
     }
   }
 
@@ -123,7 +129,10 @@ export function createRenderer({
         patchProps(el, key, null, vnode.props[key]);
       }
     }
+    const needTransition = vnode.transition;
+    if (needTransition) vnode.transition.beforeEnter(el);
     insert(el, container, anchor);
+    if (needTransition) vnode.transition.enter(el);
   }
 
   function patchElement(n1, n2) {
