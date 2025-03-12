@@ -3,7 +3,7 @@ import { reactive, effect, shallowReactive, shallowReadonly } from './'
 const Text = Symbol();
 const Comment = Symbol();
 const Fragment = Symbol();
-let currentInstance = null;
+export let currentInstance = null;
 
 function setCurrentInstance(instance) {
   currentInstance = instance;
@@ -42,7 +42,11 @@ export function createRenderer({
     } else if (typeof type === 'object' || typeof type === 'function') {
       // 组件
       if (!n1) {
-        mountComponent(n2, container, anchor);
+        if (n2.keptAlive) {
+          n2.keepAliveInstance._activate(n2, container, anchor);
+        } else {
+          mountComponent(n2, container, anchor);
+        }
       } else {
         patchComponent(n1, n2, anchor);
       }
@@ -84,7 +88,11 @@ export function createRenderer({
       vnode.children.forEach(c => unmount(c));
       return;
     } else if (typeof vnode.type === 'object') {
-      unmount(vnode.component.subTree);
+      if (vnode.shouldKeepAlive) {
+        vnode.keepAliveInstance._deActivate(vnode);
+      } else {
+        unmount(vnode.component.subTree);
+      }
       return;
     }
     const p = vnode.el.parentNode;
@@ -151,8 +159,17 @@ export function createRenderer({
       isMounted: false,
       subTree: null,
       slots,
-      mounted: []
+      mounted: [],
+      keepAliveCtx: null,
     };
+    const isKeepAlive = vnode.type.__isKeepAlive;
+    if (isKeepAlive) {
+      instance.keepAliveCtx = {
+        move(vnode, container, anchor) {
+          insert(vnode.component.subTree.el, container, anchor);
+        }
+      }
+    }
     const emit = (event, ...payload) => {
       const evenName = `on${event[0].toUpperCase()}${event.slice(1)}`;
       const handler = instance.props[evenName];
@@ -201,7 +218,7 @@ export function createRenderer({
     });
     created?.call(renderContext);
     effect(() => {
-      const subTree = render.call(instance, state);
+      const subTree = render.call(renderContext, state);
       if (!instance.isMounted) {
         beforeMount?.call(renderContext);
         patch(null, subTree, container, anchor);
