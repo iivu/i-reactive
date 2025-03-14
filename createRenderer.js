@@ -374,7 +374,8 @@ export function createRenderer({
     let newStartIdx = 0;
     let newEndIdx = newChildren.length - 1;
     let oldStartVNode = oldChildren[oldStartIdx];
-    let oldEndVNode = oldChildren[oldEndIdx];
+
+    let oldEndVNode = oldChildren[--oldEndIdx];
     let newStartVNode = newChildren[newStartIdx];
     let newEndVNode = newChildren[newEndIdx];
     while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
@@ -622,6 +623,37 @@ export const renderer = createRenderer({
   },
 });
 
+// 获取最长递增子序列
 function lis(source) {
-  // TODO: 最长递增子序列
+  if (source.length === 0) return [];
+  
+  // dp[i] 表示以 source[i] 结尾的最长递增子序列的长度
+  const dp = new Array(source.length).fill(1);
+  // 用于记录每个元素的前驱元素
+  const prev = new Array(source.length).fill(-1);
+  
+  let maxLength = 1;
+  let maxIndex = 0;
+  
+  for (let i = 1; i < source.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (source[j] < source[i] && dp[j] + 1 > dp[i]) {
+        dp[i] = dp[j] + 1;
+        prev[i] = j;
+        if (dp[i] > maxLength) {
+          maxLength = dp[i];
+          maxIndex = i;
+        }
+      }
+    }
+  }
+  
+  // 通过 prev 数组回溯得到最长递增子序列
+  const result = [];
+  for (let i = maxIndex; i >= 0; i = prev[i]) {
+    result.unshift(i);
+    if (prev[i] === -1) break;
+  }
+  
+  return result;
 }
